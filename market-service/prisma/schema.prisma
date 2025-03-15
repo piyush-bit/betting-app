@@ -1,0 +1,300 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+enum MarketStatus {
+  PENDING
+  ACTIVE
+  RESOLVED
+  CANCELLED
+  DISPUTED
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  LIMIT
+  MARKET
+}
+
+enum OrderStatus {
+  PENDING
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  EXPIRED
+}
+
+enum OrderTimeInForce {
+  GTC // Good Till Cancelled
+  IOC // Immediate Or Cancel
+  FOK // Fill Or Kill
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum DisputeReason {
+  INVALID_EVIDENCE
+  INCORRECT_OUTCOME
+  PREMATURE_RESOLUTION
+  OTHER
+}
+
+enum DisputeStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  RESOLVED
+}
+
+enum ResolutionStatus {
+  PENDING
+  CONFIRMED
+  DISPUTED
+  FINAL
+}
+
+enum AMMType {
+  CPMM
+  LMSR
+  RMM_01
+}
+
+model Markets {
+  id                String    @id @default(uuid())
+  title             String
+  description       String
+  categoryId        String
+  creatorId         String
+  resolverId        String
+  creationTime      DateTime  @default(now())
+  resolutionTime    DateTime
+  initialLiquidity  Decimal
+  status            MarketStatus
+  tradingFee        Decimal
+  isVerified        Boolean   @default(false)
+  metadata          Json?
+  lastUpdated       DateTime  @updatedAt
+  yesPool           Decimal
+  noPool            Decimal
+  resolutionRules   String
+  ammType           AMMType
+
+  // Relationships
+  category          Categories          @relation(fields: [categoryId], references: [id])
+  creator           Users              @relation("CreatedMarkets", fields: [creatorId], references: [id])
+  resolver          Users              @relation("ResolvableMarkets", fields: [resolverId], references: [id])
+  outcomes          MarketOutcomes[]
+  positions         Positions[]
+  orders            Orders[]
+  resolutions       MarketResolutions[]
+  disputes          MarketDisputes[]
+  liquidityProvisions LiquidityProvisions[]
+  trades            Trades[]
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([creationTime])
+}
+
+model MarketOutcomes {
+  id            String    @id @default(uuid())
+  marketId      String
+  outcome       String
+  currentPrice  Decimal
+  totalVolume   Decimal
+  lastUpdated   DateTime  @updatedAt
+
+  // Relationships
+  market        Markets   @relation(fields: [marketId], references: [id])
+
+  @@unique([marketId, outcome])
+  @@index([marketId])
+}
+
+model Orders {
+  id                String        @id @default(uuid())
+  marketId          String
+  userId            String
+  side              OrderSide
+  outcome           String
+  quantity          Decimal
+  price             Decimal
+  type              OrderType
+  status            OrderStatus
+  creationTime      DateTime      @default(now())
+  filledQuantity    Decimal
+  remainingQuantity Decimal
+  averageFillPrice  Decimal
+  expirationTime    DateTime?
+  timeInForce       OrderTimeInForce
+
+  // Relationships
+  market            Markets       @relation(fields: [marketId], references: [id])
+  user              Users        @relation(fields: [userId], references: [id])
+  trades            Trades[]
+
+  @@index([marketId])
+  @@index([userId])
+  @@index([status])
+}
+
+model Trades {
+  id          String    @id @default(uuid())
+  orderId     String
+  marketId    String
+  makerId     String
+  takerId     String
+  price       Decimal
+  quantity    Decimal
+  tradeTime   DateTime  @default(now())
+  side        OrderSide
+  feeAmount   Decimal
+  outcome     String
+
+  // Relationships
+  order       Orders    @relation(fields: [orderId], references: [id])
+  market      Markets   @relation(fields: [marketId], references: [id])
+  maker       Users    @relation("MakerTrades", fields: [makerId], references: [id])
+  taker       Users    @relation("TakerTrades", fields: [takerId], references: [id])
+
+  @@index([marketId])
+  @@index([orderId])
+  @@index([tradeTime])
+}
+
+model Positions {
+  id                String    @id @default(uuid())
+  marketId          String
+  userId            String
+  outcome           String
+  quantity          Decimal
+  averageEntryPrice Decimal
+  realizedPnl       Decimal
+  unrealizedPnl     Decimal
+  lastUpdated       DateTime  @updatedAt
+
+  // Relationships
+  market            Markets   @relation(fields: [marketId], references: [id])
+  user              Users    @relation(fields: [userId], references: [id])
+
+  @@unique([marketId, userId, outcome])
+  @@index([marketId])
+  @@index([userId])
+}
+
+model MarketResolutions {
+  id                String           @id @default(uuid())
+  marketId          String
+  resolverId        String
+  winningOutcome    String
+  resolutionEvidence String
+  resolutionTime    DateTime        @default(now())
+  status            ResolutionStatus
+  notes             String?
+  resolutionData    Json?
+
+  // Relationships
+  market            Markets         @relation(fields: [marketId], references: [id])
+  resolver          Users           @relation(fields: [resolverId], references: [id])
+
+  @@index([marketId])
+  @@index([status])
+}
+
+model MarketDisputes {
+  id              String        @id @default(uuid())
+  marketId        String
+  userId          String
+  disputeReason   DisputeReason
+  evidence        String
+  details         String
+  status          DisputeStatus
+  creationTime    DateTime      @default(now())
+  resolutionTime  DateTime?
+  disputeData     Json?
+
+  // Relationships
+  market          Markets       @relation(fields: [marketId], references: [id])
+  user            Users        @relation(fields: [userId], references: [id])
+
+  @@index([marketId])
+  @@index([status])
+}
+
+model LiquidityProvisions {
+  id            String    @id @default(uuid())
+  marketId      String
+  userId        String
+  amount        Decimal
+  sharesMinted  Decimal
+  provisionTime DateTime  @default(now())
+  feesEarned    Decimal
+  isActive      Boolean
+
+  // Relationships
+  market        Markets   @relation(fields: [marketId], references: [id])
+  user          Users    @relation(fields: [userId], references: [id])
+
+  @@index([marketId])
+  @@index([userId])
+}
+
+model Users {
+  id              String    @id @default(uuid())
+  username        String    @unique
+  email           String    @unique
+  passwordHash    String
+  balance         Decimal
+  lockedBalance   Decimal
+  status          UserStatus
+  createdAt       DateTime  @default(now())
+  preferences     Json?
+
+  // Relationships
+  createdMarkets  Markets[]           @relation("CreatedMarkets")
+  resolvableMarkets Markets[]         @relation("ResolvableMarkets")
+  orders          Orders[]
+  positions       Positions[]
+  disputes        MarketDisputes[]
+  liquidityProvisions LiquidityProvisions[]
+  makerTrades     Trades[]            @relation("MakerTrades")
+  takerTrades     Trades[]            @relation("TakerTrades")
+
+  @@index([username])
+  @@index([email])
+  @@index([status])
+}
+
+model Categories {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  icon        String?
+  isActive    Boolean   @default(true)
+
+  // Relationships
+  markets     Markets[]
+
+  @@index([name])
+  @@index([isActive])
+}
